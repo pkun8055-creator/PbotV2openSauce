@@ -9,6 +9,7 @@ import datetime
 import asyncio
 import sqlite3
 import aiohttp
+import io
 
 # =====================
 # タイムゾーン
@@ -252,7 +253,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 tree = bot.tree
 
 # ★ OWNER_ID は一箇所だけで定義
@@ -266,20 +267,24 @@ OFFICIAL_GUILD_ID = 1297821384076165180  # ← 公式サーバーのIDに変更�
 # 正規表現（挨拶）
 # =====================
 PATTERNS = {
-    re.compile("おはよう"): "おはよう",
-    re.compile("こんにちは"): "こんにちは",
-    re.compile("こんばんは"): "こんばんは",
-    re.compile("はろー"): "はろー",
-    re.compile("hello", re.I): "Hello",
-    re.compile(r"\bhi\b", re.I): "Hi",
-    re.compile("こんにちわ"): "こんにちわ",
-    re.compile("こーんにーちはー"): "こーんにーちはー",
-    re.compile("こーんにーちわー"): "こーんにーちわー",
-    re.compile("あけおめ"): "あけおめ",
-    re.compile("あけましておめでとうございます"): "あけましておめでとうございます",
-    re.compile("よいお年を"): "よいお年を",
-    re.compile("こんちゃ"): "こんちゃ",
-    re.compile("おやすみ"): "おやすみ",
+    re.compile("おはようござったりしません"): "おはよう...ではないか　引っかからないよ^^",
+    re.compile("おはようございません"): "おはよう...ではないか　引っかからないよ^^",
+    re.compile("こんにちは"): "こんにちは！",
+    re.compile("こんばんは"): "こんばんは！",
+    re.compile("はろー"): "はろー！",
+    re.compile("hello", re.I): "Hello!",
+    re.compile(r"\bhi\b", re.I): "Hi!",
+    re.compile("こんにちわ"): "こんにちわ！",
+    re.compile("こーんにーちはー"): "こーんにーちはー！",
+    re.compile("こーんにーちわー"): "こーんにーちわー！",
+    re.compile("あけおめ"): "あけおめ！",
+    re.compile("あけましておめでとうございます"): "あけましておめでとうございます！",
+    re.compile("よいお年を"): "よいお年を！",
+    re.compile("こんちゃ"): "こんちゃ！",
+    re.compile("おやすみ"): "おやすみ！",
+    re.compile("おはよう"): "おはよう！",
+    re.compile("まだ寝ません"): "🤔🤔🤔🤔🤔🤔",
+    re.compile("おはよ"): "おはよ！"
 }
 
 TOPICS = [
@@ -928,6 +933,20 @@ async def add_raid_text(interaction: discord.Interaction, text: str):
         await interaction.response.send_message("⚠ その文はすでに登録されています。", ephemeral=True)
 
 # =====================
+# コマンドエラー処理（存在しないコマンドは無視）
+# =====================
+@bot.event
+async def on_command_error(ctx, error):
+    # !help や !存在しないコマンド を打たれても何も反応しない（荒らし対策）
+    if isinstance(error, commands.CommandNotFound):
+        return
+    # 必要な引数が足りない・型が違う場合も静かに無視（荒らし対策を優先）
+    if isinstance(error, (commands.MissingRequiredArgument, commands.BadArgument)):
+        return
+    # それ以外のエラーはログだけ残す
+    print(f"[コマンドエラー] {ctx.command}: {error}")
+
+# =====================
 # on_ready
 # =====================
 @bot.event
@@ -1122,7 +1141,7 @@ async def on_message(message):
             for pat, text in PATTERNS.items():
                 if pat.search(content):
                     await message.channel.send(
-                        f"{message.author.mention} {text}！{message.author.display_name}さん！"
+                        f"{message.author.mention} {text}{message.author.display_name}さん！"
                     )
                     break
 
@@ -1665,19 +1684,66 @@ async def serverlist(interaction: discord.Interaction):
         await interaction.response.send_message("❌ このコマンドは管理者専用です", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True)
-    text = ""
-    for guild in bot.guilds:
-        invite_url = "取得失敗"
-        try:
-            for ch in guild.text_channels:
-                if ch.permissions_for(guild.me).create_instant_invite:
-                    invite = await ch.create_invite(max_age=0, max_uses=0)
-                    invite_url = invite.url
-                    break
-        except:
-            pass
-        text += f"**📌 {guild.name}**\n人数: {guild.member_count}\nオーナー: {guild.owner}\n招待: {invite_url}\n\n"
+    lines = []
+    for i, guild in enumerate(bot.guilds, 1):
+        lines.append(f"**{i}. {guild.name}**  |  {guild.member_count}人  |  オーナー: {guild.owner}")
+    text = "\n".join(lines)
     await interaction.followup.send(text[:2000] or "なし", ephemeral=True)
+
+# =====================
+# /invite_request
+# =====================
+@tree.command(name="invite_request", description="BOT管理者に招待リンクをDMで送ります（管理者専用）")
+@app_commands.describe(role="招待リンクと一緒に通知したいロール（任意）")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def invite_request(interaction: discord.Interaction, role: discord.Role = None):
+    guild = interaction.guild
+
+    # 招待リンクを生成
+    invite = None
+    for ch in guild.text_channels:
+        if ch.permissions_for(guild.me).create_instant_invite:
+            try:
+                invite = await ch.create_invite(max_age=0, max_uses=1, reason=f"{interaction.user} がinvite_requestを使用")
+                break
+            except:
+                continue
+
+    if not invite:
+        await interaction.response.send_message("❌ 招待リンクの生成に失敗しました（権限不足の可能性）", ephemeral=True)
+        return
+
+    # BOT管理者（ぴーくん）にDM送信
+    owner = await bot.fetch_user(OWNER_ID[0])
+    embed = discord.Embed(
+        title="📨 招待リクエスト",
+        color=discord.Color.green(),
+        timestamp=datetime.datetime.now(JST)
+    )
+    embed.add_field(name="サーバー", value=f"{guild.name} (`{guild.id}`)", inline=False)
+    embed.add_field(name="リクエスト者", value=f"{interaction.user.mention} (`{interaction.user.id}`)", inline=False)
+    embed.add_field(name="メンバー数", value=f"{guild.member_count}人", inline=True)
+    embed.add_field(name="招待リンク", value=invite.url, inline=False)
+    if role:
+        embed.add_field(name="🎭 付与ロール", value=f"{role.mention} (`{role.id}`)", inline=False)
+        embed.color = discord.Color.gold()
+    embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
+
+    try:
+        await owner.send(embed=embed)
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ BOT管理者へのDM送信に失敗しました", ephemeral=True)
+        return
+
+    msg = "✅ BOT管理者に招待リンクを送信しました！"
+    if role:
+        msg += f"\n-# ロール「{role.name}」の付与をリクエストしました"
+    await interaction.response.send_message(msg, ephemeral=True)
+
+@invite_request.error
+async def invite_request_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("❌ サーバー管理者のみ使用できます", ephemeral=True)
 
 # =====================
 # announce
@@ -1831,12 +1897,14 @@ async def keito_get_process_id() -> str | None:
                     return None
                 data = await resp.json()
         # リスト形式 or dict形式に対応
+        print(f"[KEITO] /processes レスポンス: {data}")
         processes = data if isinstance(data, list) else data.get("processes", [])
         if not processes:
             return None
-        # 最初のプロセスIDを返す（複数ある場合は最新のものを使う）
         p = processes[-1]
-        return str(p.get("id") or p.get("process_id") or p.get("pid") or "")
+        pid = p.get("id") or p.get("process_id") or p.get("pid")
+        print(f"[KEITO] 使用するprocess_id: {pid}")
+        return str(pid) if pid else None
     except Exception as e:
         print(f"[KEITO] プロセス一覧取得エラー: {e}")
         return None
@@ -1850,10 +1918,24 @@ async def show_logs(interaction: discord.Interaction, lines: int = 30):
         await interaction.followup.send("❌ `KEITO_API_KEY` が設定されていません", ephemeral=True)
         return
     try:
-        # プロセスID: 環境変数 > 自動取得
-        pid = KEITO_PROCESS_ID or await keito_get_process_id()
+        # プロセスIDを /processes から自動取得（KEITO_PROCESS_ID環境変数は使わない）
+        pid = await keito_get_process_id()
         if not pid:
-            await interaction.followup.send("❌ 実行中のプロセスが見つかりません", ephemeral=True)
+            # デバッグ用: processesのレスポンスをそのまま表示
+            try:
+                async with aiohttp.ClientSession() as _s:
+                    async with _s.get(
+                        f"{KEITO_BASE}/processes",
+                        headers={"Authorization": f"Bearer {KEITO_API_KEY}"},
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    ) as _r:
+                        _raw = await _r.text()
+                await interaction.followup.send(
+                    f"❌ プロセスが見つかりません。\n生レスポンス: {_raw[:400]}",
+                    ephemeral=True
+                )
+            except Exception as _e:
+                await interaction.followup.send(f"❌ プロセス取得失敗: {_e}", ephemeral=True)
             return
 
         async with aiohttp.ClientSession() as session:
@@ -2001,26 +2083,16 @@ async def fetch_takasumibot_job(user_id: int) -> dict:
     return {"name": "不明", "minutes": 60}
 
 async def get_takasumibot_user(message: discord.Message):
-    """interaction_metadata か mentions からユーザーを取得する"""
-    # 方法1: interaction_metadata から user_id を取得
+    """interaction_metadata か mentions からユーザーを取得する（ZAKO-Bot準拠）"""
+    # ZAKO-Bot と同じ方法: interaction_metadata.user を直接使う
     if message.interaction_metadata:
         try:
-            # discord.py によって .user か .user_id のどちらかを持つ
-            meta = message.interaction_metadata
-            uid = getattr(meta, "user_id", None)
-            if uid is None and hasattr(meta, "user"):
-                uid = meta.user.id
-            if uid:
-                return await bot.fetch_user(int(uid))
+            user = message.interaction_metadata.user
+            if user:
+                return user
         except Exception as e:
-            print(f"[takasumibot] interaction_metadata取得失敗: {e}")
-    # 方法2: message.interaction (古いAPI)
-    if hasattr(message, "interaction") and message.interaction:
-        try:
-            return message.interaction.user
-        except Exception:
-            pass
-    # 方法3: mentions
+            print(f"[takasumibot] interaction_metadata.user取得失敗: {e}")
+    # フォールバック: mentions
     if message.mentions:
         return message.mentions[0]
     return None
@@ -2189,6 +2261,15 @@ async def detect_takasumibot_work(message: discord.Message):
 # =====================
 # ひろゆきAI
 # =====================
+# ユーザー別クールタイム管理 {user_id: last_reply_timestamp}
+_hiroyuki_user_cd: dict[int, float] = {}
+# チャンネル別処理キュー {channel_id: asyncio.Lock}
+_hiroyuki_channel_locks: dict[int, asyncio.Lock] = {}
+# ひろゆきのユーザークールタイム（秒）
+HIROYUKI_USER_CD_SEC = 8
+# チャンネル内の返答間隔（秒）：連投を防ぐ
+HIROYUKI_REPLY_INTERVAL_SEC = 2.0
+
 HIROYUKI_SYSTEM = """あなたは西村博之（ひろゆき）として返答してください。
 
 【絶対ルール】
@@ -2214,34 +2295,192 @@ async def hiroyuki_respond(message: discord.Message):
         return
     if not message.content or message.content.startswith("/"):
         return
-    try:
-        async with message.channel.typing():
-            async with aiohttp.ClientSession() as session:
-                payload = {
-                    "model": "llama-3.3-70b-versatile",
-                    "max_tokens": 150,
-                    "messages": [
-                        {"role": "system", "content": HIROYUKI_SYSTEM},
-                        {"role": "user", "content": message.content}
-                    ]
-                }
-                async with session.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {GROQ_API_KEY}",
-                        "Content-Type": "application/json"
-                    },
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as resp:
-                    if resp.status != 200:
-                        print(f"[ひろゆきAI] API エラー: {resp.status} {await resp.text()}")
-                        return
-                    data = await resp.json()
-            reply = data["choices"][0]["message"]["content"]
+
+    uid = message.author.id
+    cid = message.channel.id
+    now = datetime.datetime.now().timestamp()
+
+    # ユーザー別クールタイムチェック
+    last = _hiroyuki_user_cd.get(uid, 0)
+    remaining = HIROYUKI_USER_CD_SEC - (now - last)
+    if remaining > 0:
+        print(f"[ひろゆきAI] {message.author} クールタイム中 ({remaining:.1f}秒残り) → スキップ")
+        return
+
+    # チャンネル別ロック（同時に複数処理しない）
+    if cid not in _hiroyuki_channel_locks:
+        _hiroyuki_channel_locks[cid] = asyncio.Lock()
+    lock = _hiroyuki_channel_locks[cid]
+
+    if lock.locked():
+        # 既に処理中なら無視（キューに溜めない）
+        print(f"[ひろゆきAI] チャンネル処理中 → スキップ")
+        return
+
+    async with lock:
+        # クールタイム更新
+        _hiroyuki_user_cd[uid] = now
+
+        try:
+            async with message.channel.typing():
+                async with aiohttp.ClientSession() as session:
+                    payload = {
+                        "model": "llama-3.3-70b-versatile",
+                        "max_tokens": 150,
+                        "messages": [
+                            {"role": "system", "content": HIROYUKI_SYSTEM},
+                            {"role": "user", "content": message.content}
+                        ]
+                    }
+                    async with session.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {GROQ_API_KEY}",
+                            "Content-Type": "application/json"
+                        },
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=30)
+                    ) as resp:
+                        if resp.status == 429:
+                            print(f"[ひろゆきAI] Groq レート制限")
+                            return
+                        if resp.status != 200:
+                            print(f"[ひろゆきAI] API エラー: {resp.status}")
+                            return
+                        data = await resp.json()
+                reply = data["choices"][0]["message"]["content"]
+
+            # Discord送信後に一時停止してレート制限を回避
             await message.reply(reply)
-    except Exception as e:
-        print(f"[ひろゆきAI] エラー: {e}")
+            await asyncio.sleep(HIROYUKI_REPLY_INTERVAL_SEC)
+
+        except discord.HTTPException as e:
+            if e.status == 429:
+                print(f"[ひろゆきAI] Discord レート制限: {e.retry_after:.1f}秒待機")
+                await asyncio.sleep(e.retry_after + 0.5)
+            else:
+                print(f"[ひろゆきAI] Discord エラー: {e}")
+        except Exception as e:
+            print(f"[ひろゆきAI] エラー: {e}")
+
+
+# =====================
+# Make it a Quote
+# =====================
+FONT_PATH = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+FONT_PATH_BOLD = "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
+JP_INDEX = 2  # TTCファイル内の日本語インデックス
+
+def get_dominant_color(img) -> tuple:
+    img_small = img.convert("RGB").resize((50, 50))
+    pixels = list(img_small.getdata())
+    filtered = [p for p in pixels if 60 < sum(p) < 700]
+    if not filtered:
+        return (0, 180, 0)
+    return tuple(int(sum(c[i] for c in filtered) / len(filtered)) for i in range(3))
+
+async def create_quote_image(text: str, author_name: str, username: str, avatar_bytes: bytes | None) -> io.BytesIO:
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    import textwrap
+
+    W, H = 1200, 630
+    img = Image.new("RGB", (W, H), (0, 0, 0))
+
+    dominant = (80, 80, 80)
+    av_img = None
+    av_w = 0
+    if avatar_bytes:
+        try:
+            av_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
+            dominant = get_dominant_color(av_img)
+            av_h = int(H * 0.92)
+            av_w = int(av_img.width * av_h / av_img.height)
+            av_img = av_img.resize((av_w, av_h), Image.LANCZOS)
+        except:
+            av_img = None
+
+    # グロー
+    glow_x = int(W * 0.78)
+    glow_y = H // 2
+    glow = Image.new("RGB", (W, H), (0, 0, 0))
+    gd = ImageDraw.Draw(glow)
+    for i in range(60, 0, -1):
+        ratio = i / 60
+        r = int(dominant[0] * ratio * 0.85)
+        g = int(dominant[1] * ratio * 0.85)
+        b = int(dominant[2] * ratio * 0.85)
+        size = int(H * 0.7 * ratio)
+        gd.ellipse([glow_x - size, glow_y - size, glow_x + size, glow_y + size], fill=(r, g, b))
+    img = Image.blend(img, glow.filter(ImageFilter.GaussianBlur(30)), alpha=0.9)
+
+    if av_img:
+        av_x = W - av_w + int(av_w * 0.05)
+        av_y = H - int(H * 0.92) + int(H * 0.04)
+        img.paste(av_img, (av_x, av_y), av_img)
+
+    draw = ImageDraw.Draw(img)
+    try:
+        font_quote = ImageFont.truetype(FONT_PATH, 72)
+        font_author = ImageFont.truetype(FONT_PATH_BOLD, 42, index=JP_INDEX)
+        font_user = ImageFont.truetype(FONT_PATH, 30, index=JP_INDEX)
+    except:
+        font_quote = ImageFont.load_default()
+        font_author = font_quote
+        font_user = font_quote
+
+    text_x = int(W * 0.08)
+    lines_list = []
+    for para in text.split("\n"):
+        wrapped = (textwrap.wrap(para, width=16) or [para]) if para else [""]
+        lines_list.extend(wrapped)
+    lines_list = lines_list[:5]
+
+    text_y = int(H * 0.25)
+    for line in lines_list:
+        draw.text((text_x, text_y), line, font=font_quote, fill=(255, 255, 255))
+        text_y += 80
+
+    text_y += 16
+    draw.text((text_x + 4, text_y), f"- {author_name}", font=font_author, fill=(220, 220, 220))
+    draw.text((text_x + 6, text_y + 52), f"@{username}", font=font_user, fill=(160, 160, 160))
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
+
+
+@tree.context_menu(name="📸 Make it a Quote")
+async def make_quote(interaction: discord.Interaction, message: discord.Message):
+    if not message.content:
+        await interaction.response.send_message("❌ テキストのないメッセージには使えません", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+
+    # アバター取得
+    avatar_bytes = None
+    try:
+        async with aiohttp.ClientSession() as session:
+            avatar_url = message.author.display_avatar.with_size(128).url
+            async with session.get(avatar_url) as resp:
+                if resp.status == 200:
+                    avatar_bytes = await resp.read()
+    except:
+        pass
+
+    # 画像生成
+    username = str(message.author).replace("#0", "") if message.author.discriminator == "0" else str(message.author)
+    buf = await create_quote_image(
+        text=message.content,
+        author_name=message.author.display_name,
+        username=username,
+        avatar_bytes=avatar_bytes
+    )
+
+    await interaction.followup.send(
+        file=discord.File(buf, filename="quote.png")
+    )
 
 @tree.command(name="hiroyuki_set", description="ひろゆきAIが反応するチャンネルを設定します（管理者専用）")
 @app_commands.describe(channel="ひろゆきAIを有効にするチャンネル")

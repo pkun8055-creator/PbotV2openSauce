@@ -106,6 +106,29 @@ CREATE TABLE IF NOT EXISTS pr_rights (
     promo_text TEXT DEFAULT '',
     last_updated TEXT DEFAULT NULL
 );
+
+CREATE TABLE IF NOT EXISTS guild_settings (
+    guild_id           INTEGER PRIMARY KEY,
+    join_enabled       INTEGER DEFAULT 0,
+    join_channel       INTEGER,
+    join_message       TEXT    DEFAULT '{user} さんが参加しました！',
+    leave_enabled      INTEGER DEFAULT 0,
+    leave_channel      INTEGER,
+    leave_message      TEXT    DEFAULT '{user} さんが退出しました',
+    raid_enabled       INTEGER DEFAULT 1,
+    raid_excluded_roles TEXT   DEFAULT '[]',
+    report_channel     INTEGER,
+    audit_enabled      INTEGER DEFAULT 0,
+    audit_channel      INTEGER,
+    audit_edit         INTEGER DEFAULT 1,
+    audit_delete       INTEGER DEFAULT 1,
+    audit_timeout      INTEGER DEFAULT 1,
+    audit_kick         INTEGER DEFAULT 1,
+    audit_ban          INTEGER DEFAULT 1,
+    verify_enabled     INTEGER DEFAULT 0,
+    verify_role        INTEGER,
+    verify_log_channel INTEGER
+);
 """)
 
 # announce_enabled カラム追加（既存DBへの対応）
@@ -119,6 +142,46 @@ except:
     pass
 
 conn.commit()
+
+# =====================
+# guild_settings ヘルパー
+# =====================
+import json as _json
+
+def get_guild_settings(guild_id: int) -> dict:
+    """guild_settings を取得。行がなければデフォルト値を返す"""
+    cursor.execute("SELECT * FROM guild_settings WHERE guild_id=?", (guild_id,))
+    row = cursor.fetchone()
+    defaults = {
+        "guild_id": guild_id,
+        "join_enabled": 0,      "join_channel": None,
+        "join_message": "{user} さんが参加しました！",
+        "leave_enabled": 0,     "leave_channel": None,
+        "leave_message": "{user} さんが退出しました",
+        "raid_enabled": 1,      "raid_excluded_roles": "[]",
+        "report_channel": None,
+        "audit_enabled": 0,     "audit_channel": None,
+        "audit_edit": 1,        "audit_delete": 1,
+        "audit_timeout": 1,     "audit_kick": 1,    "audit_ban": 1,
+        "verify_enabled": 0,    "verify_role": None, "verify_log_channel": None,
+    }
+    if row:
+        defaults.update(dict(row))
+    return defaults
+
+def upsert_guild_settings(guild_id: int, **kwargs):
+    existing = get_guild_settings(guild_id)
+    existing.update(kwargs)
+    existing["guild_id"] = guild_id
+    cols = ", ".join(existing.keys())
+    ph   = ", ".join(["?"] * len(existing))
+    ups  = ", ".join(f"{k}=excluded.{k}" for k in existing if k != "guild_id")
+    cursor.execute(
+        f"INSERT INTO guild_settings ({cols}) VALUES ({ph}) "
+        f"ON CONFLICT(guild_id) DO UPDATE SET {ups}",
+        list(existing.values())
+    )
+    conn.commit()
 
 # =====================
 # PR権限ヘルパー
@@ -175,6 +238,32 @@ def can_update_pr(user_id: int) -> tuple:
     hours, rem = divmod(remaining.seconds, 3600)
     minutes = rem // 60
     return False, f"{days}日{hours}時間{minutes}分"
+
+def get_pr_display_name(pr_uid: int) -> str:
+    pr_user = bot.get_user(pr_uid)
+    return pr_user.display_name if pr_user else f"ID:{pr_uid}"
+
+def add_pr_field(embed: discord.Embed) -> discord.Embed:
+    """順番制のPR(宣伝文)をEmbedにフィールドとして追加する共通ヘルパー"""
+    pr_entry = get_next_pr()
+    if pr_entry:
+        pr_uid, pr_text = pr_entry
+        pr_name = get_pr_display_name(pr_uid)
+        embed.add_field(
+            name="📣 PR",
+            value=f"{pr_text}\n-# pr者： {pr_name}　⚠️ こちらのリンクは危険な可能性もあります",
+            inline=False
+        )
+    return embed
+
+def get_pr_text_line() -> str | None:
+    """埋め込みを使わないプレーンテキスト通知用のPR行を返す（なければNone）"""
+    pr_entry = get_next_pr()
+    if not pr_entry:
+        return None
+    pr_uid, pr_text = pr_entry
+    pr_name = get_pr_display_name(pr_uid)
+    return f"📣 PR: {pr_text}\n-# pr者： {pr_name}　⚠️ こちらのリンクは危険な可能性もあります"
 
 # =====================
 # カウントゲームユーティリティ
@@ -253,7 +342,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
+bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
 # ★ OWNER_ID は一箇所だけで定義
@@ -267,24 +356,20 @@ OFFICIAL_GUILD_ID = 1297821384076165180  # ← 公式サーバーのIDに変更�
 # 正規表現（挨拶）
 # =====================
 PATTERNS = {
-    re.compile("おはようござったりしません"): "おはよう...ではないか　引っかからないよ^^",
-    re.compile("おはようございません"): "おはよう...ではないか　引っかからないよ^^",
-    re.compile("こんにちは"): "こんにちは！",
-    re.compile("こんばんは"): "こんばんは！",
-    re.compile("はろー"): "はろー！",
-    re.compile("hello", re.I): "Hello!",
-    re.compile(r"\bhi\b", re.I): "Hi!",
-    re.compile("こんにちわ"): "こんにちわ！",
-    re.compile("こーんにーちはー"): "こーんにーちはー！",
-    re.compile("こーんにーちわー"): "こーんにーちわー！",
-    re.compile("あけおめ"): "あけおめ！",
-    re.compile("あけましておめでとうございます"): "あけましておめでとうございます！",
-    re.compile("よいお年を"): "よいお年を！",
-    re.compile("こんちゃ"): "こんちゃ！",
-    re.compile("おやすみ"): "おやすみ！",
-    re.compile("おはよう"): "おはよう！",
-    re.compile("まだ寝ません"): "🤔🤔🤔🤔🤔🤔",
-    re.compile("おはよ"): "おはよ！"
+    re.compile("おはよう"): "おはよう",
+    re.compile("こんにちは"): "こんにちは",
+    re.compile("こんばんは"): "こんばんは",
+    re.compile("はろー"): "はろー",
+    re.compile("hello", re.I): "Hello",
+    re.compile(r"\bhi\b", re.I): "Hi",
+    re.compile("こんにちわ"): "こんにちわ",
+    re.compile("こーんにーちはー"): "こーんにーちはー",
+    re.compile("こーんにーちわー"): "こーんにーちわー",
+    re.compile("あけおめ"): "あけおめ",
+    re.compile("あけましておめでとうございます"): "あけましておめでとうございます",
+    re.compile("よいお年を"): "よいお年を",
+    re.compile("こんちゃ"): "こんちゃ",
+    re.compile("おやすみ"): "おやすみ",
 }
 
 TOPICS = [
@@ -493,7 +578,7 @@ async def work(interaction: discord.Interaction):
         cursor.execute("DELETE FROM reminders WHERE id=?", (row[0],))
         conn.commit()
 
-    reward = random.randint(200, 500)
+    reward = random.randint(4000, 5000)
     add_global_coins(user_id, reward)
     total = get_global_coins(user_id)
 
@@ -505,13 +590,14 @@ async def work(interaction: discord.Interaction):
     conn.commit()
 
     embed = discord.Embed(
-        title="💼 お仕事完了！",
+        title="💼 work完了",
         color=discord.Color.green()
     )
     embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
     embed.add_field(name="獲得コイン", value=f"**+{reward}コイン** 💰", inline=True)
     embed.add_field(name="所持コイン", value=f"**{total}コイン**", inline=True)
     embed.add_field(name="次回使用可能", value=f"{next_time.strftime('%H:%M')}", inline=True)
+    add_pr_field(embed)
     await interaction.followup.send(embed=embed)
 
     async def _log():
@@ -667,7 +753,8 @@ def get_level(xp: int) -> int:
 def xp_for_level(level: int) -> int:
     return level * level * 100
 
-async def add_xp(member: discord.Member, guild: discord.Guild, amount: int):
+async def add_xp(member: discord.Member, guild: discord.Guild, amount: int,
+                  bypass_cooldown: bool = False, update_last: bool = True):
     user_id = member.id
     guild_id = guild.id
     now = datetime.datetime.now(datetime.timezone.utc).timestamp()
@@ -683,19 +770,21 @@ async def add_xp(member: discord.Member, guild: discord.Guild, amount: int):
     else:
         xp, level, last = 0, 0, 0.0
 
-    # クールタイム 10秒
-    if now - last < 10:
+    # メッセージXPのみ10秒クールタイムを適用（VCからの呼び出しはbypass_cooldown=Trueで無視）
+    if not bypass_cooldown and now - last < 10:
         return
 
     xp += amount
     new_level = get_level(xp)
+    # VCからの呼び出しはlast_messageを更新しない（メッセージのクールタイム判定に影響させないため）
+    new_last = now if update_last else last
 
     cursor.execute("""
         INSERT INTO user_data (user_id, guild_id, xp, level, last_message)
         VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(user_id, guild_id)
         DO UPDATE SET xp=?, level=?, last_message=?
-    """, (user_id, guild_id, xp, new_level, now, xp, new_level, now))
+    """, (user_id, guild_id, xp, new_level, new_last, xp, new_level, new_last))
     conn.commit()
 
     if new_level > level:
@@ -738,6 +827,7 @@ async def level_up(member: discord.Member, guild: discord.Guild, new_level: int,
             description=f"{member.mention} さんが **Lv {new_level}** になりました！",
             color=discord.Color.gold()
         )
+        add_pr_field(embed)
         await announce_ch.send(embed=embed)
 
     if log_ch:
@@ -779,16 +869,7 @@ async def level_cmd(interaction: discord.Interaction):
     embed.add_field(name="レベル", value=f"Lv. **{lvl}**", inline=True)
     embed.add_field(name="XP", value=f"{xp} XP", inline=True)
     embed.add_field(name=f"次のレベルまで", value=f"`{bar}` {progress}/{needed}", inline=False)
-    pr_entry = get_next_pr()
-    if pr_entry:
-        pr_uid, pr_text = pr_entry
-        pr_user = bot.get_user(pr_uid)
-        pr_name = pr_user.display_name if pr_user else f"ID:{pr_uid}"
-        embed.add_field(
-            name="📣 PR",
-            value=f"{pr_text}\n-# pr者： {pr_name}　⚠️ こちらのリンクは危険な可能性もあります",
-            inline=False
-        )
+    add_pr_field(embed)
 
     await interaction.followup.send(embed=embed)
 
@@ -817,6 +898,7 @@ async def rank(interaction: discord.Interaction):
         description=desc,
         color=discord.Color.gold()
     )
+    add_pr_field(embed)
     await interaction.followup.send(embed=embed)
 
 # =====================
@@ -933,20 +1015,6 @@ async def add_raid_text(interaction: discord.Interaction, text: str):
         await interaction.response.send_message("⚠ その文はすでに登録されています。", ephemeral=True)
 
 # =====================
-# コマンドエラー処理（存在しないコマンドは無視）
-# =====================
-@bot.event
-async def on_command_error(ctx, error):
-    # !help や !存在しないコマンド を打たれても何も反応しない（荒らし対策）
-    if isinstance(error, commands.CommandNotFound):
-        return
-    # 必要な引数が足りない・型が違う場合も静かに無視（荒らし対策を優先）
-    if isinstance(error, (commands.MissingRequiredArgument, commands.BadArgument)):
-        return
-    # それ以外のエラーはログだけ残す
-    print(f"[コマンドエラー] {ctx.command}: {error}")
-
-# =====================
 # on_ready
 # =====================
 @bot.event
@@ -970,6 +1038,7 @@ async def on_ready():
     bot.add_view(CoinSettings())
     bot.add_view(LevelPanel())
     bot.add_view(HelpPanel())
+    bot.add_view(VerifyButton())
 
     if not reminder_loop.is_running():
         reminder_loop.start()
@@ -977,6 +1046,8 @@ async def on_ready():
         pin_loop.start()
     if not status_loop.is_running():
         status_loop.start()
+    if not vc_xp_loop.is_running():
+        vc_xp_loop.start()
 
 # =====================
 # PIN常駐（修正版）
@@ -1121,14 +1192,19 @@ async def on_message(message):
                 await report_channel.send(embed=embed)
             return
 
-    # 荒らし検知
+    # 荒らし検知 (guild_settings 対応版)
     if is_ozeu(content) and not is_staff:
-        await message.delete()
-        await message.channel.send(
-            f"⚠ {message.author.mention} 荒らし行為、または詐欺行為を検知しました",
-            delete_after=3
-        )
-        return
+        s = get_guild_settings(message.guild.id) if message.guild else {"raid_enabled": 1, "raid_excluded_roles": "[]"}
+        if s.get("raid_enabled", 1):
+            excluded = _json.loads(s.get("raid_excluded_roles") or "[]")
+            role_ids = [str(r.id) for r in message.author.roles]
+            if not any(rid in excluded for rid in role_ids):
+                await message.delete()
+                await message.channel.send(
+                    f"⚠ {message.author.mention} 荒らし行為、または詐欺行為を検知しました",
+                    delete_after=3
+                )
+                return
 
     # =====================
     # 挨拶反応（インデントバグ修正）
@@ -1141,7 +1217,7 @@ async def on_message(message):
             for pat, text in PATTERNS.items():
                 if pat.search(content):
                     await message.channel.send(
-                        f"{message.author.mention} {text}{message.author.display_name}さん！"
+                        f"{message.author.mention} {text}！{message.author.display_name}さん！"
                     )
                     break
 
@@ -1167,10 +1243,9 @@ async def on_message(message):
                     await message.channel.send(warn, delete_after=5)
                     return
 
-                # 数字ミス → リセット
+                # 数字ミス → カウントゲームのみリセット（コイン残高は変更しない）
                 if number != current:
                     await message.add_reaction("❌")
-                    reset_global_coins(message.author.id)
                     new_x = random.randint(1, 9)
                     start = next_valid_number(1, str(new_x))
                     settings["current_number"] = start
@@ -1208,6 +1283,162 @@ async def on_message(message):
         await add_xp(message.author, message.guild, random.randint(5, 15))
 
     await bot.process_commands(message)
+
+# =====================
+# 入退出・監査ログ・イベント
+# =====================
+@bot.event
+async def on_member_join(member: discord.Member):
+    s = get_guild_settings(member.guild.id)
+    if not s["join_enabled"] or not s["join_channel"]:
+        return
+    ch = member.guild.get_channel(int(s["join_channel"]))
+    if not ch:
+        return
+    msg = (
+        (s["join_message"] or "{user} さんが参加しました！")
+        .replace("{user}",   member.mention)
+        .replace("{name}",   member.display_name)
+        .replace("{server}", member.guild.name)
+    )
+    embed = discord.Embed(description=msg, color=discord.Color.green(),
+                          timestamp=datetime.datetime.now(JST))
+    embed.set_thumbnail(url=member.display_avatar.url)
+    await ch.send(embed=embed)
+
+@bot.event
+async def on_member_remove(member: discord.Member):
+    guild = member.guild
+    s     = get_guild_settings(guild.id)
+    now   = datetime.datetime.now(datetime.timezone.utc)
+    # kick か退室か判定
+    is_kick   = False
+    kick_exec = None
+    try:
+        if guild.me.guild_permissions.view_audit_log:
+            async for entry in guild.audit_logs(action=discord.AuditLogAction.kick, limit=5):
+                age = (now - entry.created_at.replace(tzinfo=datetime.timezone.utc)).total_seconds()
+                if entry.target.id == member.id and age < 10:
+                    is_kick   = True
+                    kick_exec = entry.user
+                    break
+    except Exception as e:
+        print(f"[audit kick] {e}")
+    # kick 監査ログ
+    if is_kick and s["audit_enabled"] and s["audit_kick"] and s["audit_channel"]:
+        audit_ch = guild.get_channel(int(s["audit_channel"]))
+        if audit_ch:
+            embed = discord.Embed(title="👢 キック", color=discord.Color.orange(),
+                                  timestamp=datetime.datetime.now(JST))
+            embed.add_field(name="対象",   value=f"{member} ({member.id})", inline=False)
+            embed.add_field(name="実行者", value=str(kick_exec) if kick_exec else "不明", inline=False)
+            await audit_ch.send(embed=embed)
+    # 退室通知
+    if s["leave_enabled"] and s["leave_channel"]:
+        ch = guild.get_channel(int(s["leave_channel"]))
+        if ch:
+            msg = (
+                (s["leave_message"] or "{user} さんが退出しました")
+                .replace("{user}", f"**{member.display_name}**")
+                .replace("{name}", member.display_name)
+            )
+            embed = discord.Embed(description=msg, color=discord.Color.red(),
+                                  timestamp=datetime.datetime.now(JST))
+            embed.set_thumbnail(url=member.display_avatar.url)
+            await ch.send(embed=embed)
+
+@bot.event
+async def on_message_edit(before: discord.Message, after: discord.Message):
+    if before.author.bot or before.content == after.content or not before.guild:
+        return
+    s = get_guild_settings(before.guild.id)
+    if not (s["audit_enabled"] and s["audit_edit"] and s["audit_channel"]):
+        return
+    ch = before.guild.get_channel(int(s["audit_channel"]))
+    if not ch:
+        return
+    embed = discord.Embed(title="✏️ メッセージ編集", color=discord.Color.yellow(),
+                          timestamp=datetime.datetime.now(JST))
+    embed.set_author(name=str(before.author), icon_url=before.author.display_avatar.url)
+    embed.add_field(name="チャンネル", value=before.channel.mention,            inline=False)
+    embed.add_field(name="編集前",     value=before.content[:500] or "（空）",  inline=False)
+    embed.add_field(name="編集後",     value=after.content[:500]  or "（空）",  inline=False)
+    embed.add_field(name="リンク",     value=f"[ジャンプ]({after.jump_url})",   inline=False)
+    await ch.send(embed=embed)
+
+@bot.event
+async def on_message_delete(message: discord.Message):
+    if message.author.bot or not message.guild:
+        return
+    s = get_guild_settings(message.guild.id)
+    if not (s["audit_enabled"] and s["audit_delete"] and s["audit_channel"]):
+        return
+    ch = message.guild.get_channel(int(s["audit_channel"]))
+    if not ch:
+        return
+    embed = discord.Embed(title="🗑️ メッセージ削除", color=discord.Color.red(),
+                          timestamp=datetime.datetime.now(JST))
+    embed.set_author(name=str(message.author), icon_url=message.author.display_avatar.url)
+    embed.add_field(name="チャンネル", value=message.channel.mention,              inline=False)
+    embed.add_field(name="内容",       value=message.content[:500] or "（なし）",  inline=False)
+    await ch.send(embed=embed)
+
+@bot.event
+async def on_member_ban(guild: discord.Guild, user: discord.User):
+    s = get_guild_settings(guild.id)
+    if not (s["audit_enabled"] and s["audit_ban"] and s["audit_channel"]):
+        return
+    ch = guild.get_channel(int(s["audit_channel"]))
+    if not ch:
+        return
+    executor = None
+    try:
+        if guild.me.guild_permissions.view_audit_log:
+            async for entry in guild.audit_logs(action=discord.AuditLogAction.ban, limit=3):
+                if entry.target.id == user.id:
+                    executor = entry.user
+                    break
+    except Exception as e:
+        print(f"[audit ban] {e}")
+    embed = discord.Embed(title="🔨 BAN", color=discord.Color.dark_red(),
+                          timestamp=datetime.datetime.now(JST))
+    embed.add_field(name="対象",   value=f"{user} ({user.id})", inline=False)
+    embed.add_field(name="実行者", value=str(executor) if executor else "不明", inline=False)
+    await ch.send(embed=embed)
+
+@bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    guild = before.guild
+    s     = get_guild_settings(guild.id)
+    if not (s["audit_enabled"] and s["audit_timeout"] and s["audit_channel"]):
+        return
+    now     = datetime.datetime.now(datetime.timezone.utc)
+    was_out = before.timed_out_until is None
+    now_out = (after.timed_out_until is not None and
+               after.timed_out_until.replace(tzinfo=datetime.timezone.utc) > now)
+    if not (was_out and now_out):
+        return
+    ch = guild.get_channel(int(s["audit_channel"]))
+    if not ch:
+        return
+    executor = None
+    try:
+        if guild.me.guild_permissions.view_audit_log:
+            async for entry in guild.audit_logs(
+                action=discord.AuditLogAction.member_update, limit=3
+            ):
+                if entry.target.id == after.id:
+                    executor = entry.user
+                    break
+    except Exception as e:
+        print(f"[audit timeout] {e}")
+    embed = discord.Embed(title="⏰ タイムアウト", color=discord.Color.orange(),
+                          timestamp=datetime.datetime.now(JST))
+    embed.add_field(name="対象",     value=f"{after} ({after.id})", inline=False)
+    embed.add_field(name="解除時刻",
+                    value=f"<t:{int(after.timed_out_until.timestamp())}:F>", inline=False)
+    embed.add_field(name="実行者",   value=str(executor) if executor else "不明", inline=False)
+    await ch.send(embed=embed)
 
 # =====================
 # PIN コンテキストメニュー
@@ -1523,6 +1754,7 @@ async def ranking(interaction: discord.Interaction, type: app_commands.Choice[st
         description=description if description else "データがありません",
         color=color
     )
+    add_pr_field(embed)
     await interaction.followup.send(embed=embed)
 
 # =====================
@@ -1533,25 +1765,29 @@ async def report_message(interaction: discord.Interaction, message: discord.Mess
     if message.author.id == interaction.user.id:
         await interaction.response.send_message("❌ 自分のメッセージは通報できません", ephemeral=True)
         return
-
     guild = interaction.guild
-    report_channel = discord.utils.get(guild.text_channels, name=REPORT_CHANNEL_NAME)
-
-    if not report_channel:
-        await interaction.response.send_message("⚠ 通報用チャンネルが見つかりません", ephemeral=True)
+    s = get_guild_settings(guild.id)
+    # DBに設定があれば優先、なければチャンネル名でフォールバック
+    report_ch = None
+    if s.get("report_channel"):
+        report_ch = guild.get_channel(int(s["report_channel"]))
+    if not report_ch:
+        report_ch = discord.utils.get(guild.text_channels, name=REPORT_CHANNEL_NAME)
+    if not report_ch:
+        await interaction.response.send_message(
+            "⚠ 通報用チャンネルが設定されていません。ダッシュボードで設定してください。",
+            ephemeral=True
+        )
         return
-
     embed = discord.Embed(title="🚨 メッセージ通報", color=discord.Color.red())
-    embed.add_field(name="通報者", value=f"{interaction.user} ({interaction.user.id})", inline=False)
-    embed.add_field(name="投稿者", value=f"{message.author} ({message.author.id})", inline=False)
-    embed.add_field(name="チャンネル", value=message.channel.mention, inline=False)
-    embed.add_field(name="メッセージ内容", value=message.content or "（内容なし）", inline=False)
-    embed.add_field(name="メッセージリンク", value=f"[ジャンプ]({message.jump_url})", inline=False)
-    await report_channel.send(embed=embed)
-
-    await send_webhook_log(guild.id, embed)
-
-    await interaction.response.send_message("✅ メッセージを通報しました。管理者が確認します。", ephemeral=True)
+    embed.add_field(name="通報者",         value=f"{interaction.user} ({interaction.user.id})", inline=False)
+    embed.add_field(name="投稿者",         value=f"{message.author} ({message.author.id})",     inline=False)
+    embed.add_field(name="チャンネル",     value=message.channel.mention,                       inline=False)
+    embed.add_field(name="メッセージ内容", value=message.content or "（内容なし）",               inline=False)
+    embed.add_field(name="リンク",         value=f"[ジャンプ]({message.jump_url})",               inline=False)
+    await report_ch.send(embed=embed)
+    asyncio.create_task(send_webhook_log(guild.id, embed))
+    await interaction.response.send_message("✅ 通報しました。管理者が確認します。", ephemeral=True)
 
 # =====================
 # ping / topic / serverprofile
@@ -1570,16 +1806,7 @@ async def topic(interaction: discord.Interaction):
     await interaction.response.defer()
     topic_text = random.choice(TOPICS)
     embed = discord.Embed(title="💬 雑談テーマ", description=topic_text, color=discord.Color.orange())
-    pr_entry = get_next_pr()
-    if pr_entry:
-        pr_uid, pr_text = pr_entry
-        pr_user = bot.get_user(pr_uid)
-        pr_name = pr_user.display_name if pr_user else f"ID:{pr_uid}"
-        embed.add_field(
-            name="📣 PR",
-            value=f"{pr_text}\n-# pr者： {pr_name}　⚠️ こちらのリンクは危険な可能性もあります",
-            inline=False
-        )
+    add_pr_field(embed)
     if interaction.guild:
         log_embed = make_action_embed("/topic", interaction.user, discord.Color.orange(), テーマ=topic_text)
         await send_webhook_log(interaction.guild.id, log_embed)
@@ -1632,16 +1859,7 @@ async def slot(interaction: discord.Interaction):
         description=msg,
         color=color
     )
-    pr_entry = get_next_pr()
-    if pr_entry:
-        pr_uid, pr_text = pr_entry
-        pr_user = bot.get_user(pr_uid)
-        pr_name = pr_user.display_name if pr_user else f"ID:{pr_uid}"
-        embed.add_field(
-            name="📣 PR",
-            value=f"{pr_text}\n-# pr者： {pr_name}　⚠️ こちらのリンクは危険な可能性もあります",
-            inline=False
-        )
+    add_pr_field(embed)
     if interaction.guild:
         log_embed = make_action_embed("/slot", interaction.user, color, 結果=view_str, 詳細=msg)
         await send_webhook_log(interaction.guild.id, log_embed)
@@ -1651,17 +1869,16 @@ async def slot(interaction: discord.Interaction):
 # 挨拶ON/OFF
 # =====================
 @tree.command(name="greeting", description="挨拶機能のON/OFFを切り替えます")
-@app_commands.describe(mode="on または off")
-async def greeting_toggle(interaction: discord.Interaction, mode: str):
+@app_commands.describe(mode="ON または OFF を選択")
+@app_commands.choices(mode=[
+    app_commands.Choice(name="ON", value="on"),
+    app_commands.Choice(name="OFF", value="off"),
+])
+@app_commands.checks.has_permissions(manage_guild=True)
+async def greeting_toggle(interaction: discord.Interaction, mode: app_commands.Choice[str]):
     await interaction.response.defer(ephemeral=True)
-    if not interaction.guild_permissions.manage_guild:
-        await interaction.followup.send("❌ サーバー管理者のみ変更できます", ephemeral=True)
-        return
-    if mode.lower() not in ["on", "off"]:
-        await interaction.followup.send("使い方: /greeting on または /greeting off", ephemeral=True)
-        return
     guild_id = str(interaction.guild.id)
-    greeting_settings[guild_id] = (mode.lower() == "on")
+    greeting_settings[guild_id] = (mode.value == "on")
     save_greeting_settings(greeting_settings)
     state = "ON" if greeting_settings[guild_id] else "OFF"
 
@@ -1674,6 +1891,11 @@ async def greeting_toggle(interaction: discord.Interaction, mode: str):
     )
     if interaction.guild:
         await send_webhook_log(interaction.guild.id, log_embed)
+
+@greeting_toggle.error
+async def greeting_toggle_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("❌ サーバー管理者のみ変更できます", ephemeral=True)
 
 # =====================
 # サーバーリスト
@@ -2010,7 +2232,7 @@ class HelpPanel(discord.ui.View):
 
     @discord.ui.button(label="⭐ レベル", style=discord.ButtonStyle.secondary, custom_id="help_level")
     async def level(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(title="⭐ レベルシステム", description="メッセージでXPが増えてレベルアップ！", color=discord.Color.blue())
+        embed = discord.Embed(title="⭐ レベルシステム", description="メッセージ or VC滞在でXPが増えてレベルアップ！", color=discord.Color.blue())
         embed.add_field(name="コマンド", value="/level - レベル確認\n/rank - ランキング\n/ranking - 各種ランキング\n/level_settings - 設定（管理者）", inline=False)
         await interaction.response.edit_message(embed=embed, view=self)
 
@@ -2045,6 +2267,22 @@ async def help_cmd(interaction: discord.Interaction):
 # =====================
 # ループ処理
 # =====================
+
+# VC滞在時間に応じたレベリング（5分ごとに巡回してVC参加者へXPを付与）
+VC_XP_PER_INTERVAL = 15  # 5分ごとに付与するXP量（お好みで調整）
+
+@tasks.loop(minutes=5)
+async def vc_xp_loop():
+    for guild in bot.guilds:
+        for vc in guild.voice_channels:
+            members_in_vc = [m for m in vc.members if not m.bot]
+            if not members_in_vc:
+                continue
+            for m in members_in_vc:
+                try:
+                    await add_xp(m, guild, VC_XP_PER_INTERVAL, bypass_cooldown=True, update_last=False)
+                except Exception as e:
+                    print(f"[VC XP] エラー: {e}")
 
 # =====================
 # takasumibot /work 通知システム
@@ -2102,10 +2340,8 @@ async def detect_takasumibot_work(message: discord.Message):
     if message.author.id != TAKASUMIBOT_ID:
         return
 
-    # デバッグ: takasumibotのメッセージ内容をprint
-    print(f"[takasumibot] メッセージ受信: embeds={len(message.embeds)}, content={message.content!r}")
-    for i, e in enumerate(message.embeds):
-        print(f"  embed[{i}] title={e.title!r} desc={e.description!r}")
+
+
 
     for embed in message.embeds:
         desc = embed.description or ""
@@ -2144,6 +2380,7 @@ async def detect_takasumibot_work(message: discord.Message):
                 ),
                 color=0xff9900
             )
+            add_pr_field(res_embed)
             await message.channel.send(embed=res_embed)
             return
 
@@ -2181,6 +2418,7 @@ async def detect_takasumibot_work(message: discord.Message):
                 ),
                 color=0x00ff00
             )
+            add_pr_field(res_embed)
             await message.channel.send(embed=res_embed)
             return
 
@@ -2255,6 +2493,7 @@ async def detect_takasumibot_work(message: discord.Message):
                 ),
                 color=0x00aaff
             )
+            add_pr_field(res_embed)
             await message.channel.send(embed=res_embed)
             return
 
@@ -2266,9 +2505,13 @@ _hiroyuki_user_cd: dict[int, float] = {}
 # チャンネル別処理キュー {channel_id: asyncio.Lock}
 _hiroyuki_channel_locks: dict[int, asyncio.Lock] = {}
 # ひろゆきのユーザークールタイム（秒）
-HIROYUKI_USER_CD_SEC = 8
+HIROYUKI_USER_CD_SEC = 2
 # チャンネル内の返答間隔（秒）：連投を防ぐ
-HIROYUKI_REPLY_INTERVAL_SEC = 2.0
+HIROYUKI_REPLY_INTERVAL_SEC = 1.0
+
+# Groqモデル設定（2026/8/16に llama-3.3-70b-versatile が廃止されたため gpt-oss-120b を使用）
+# 廃止情報の確認先: https://console.groq.com/docs/deprecations
+GROQ_MODEL = "openai/gpt-oss-120b"
 
 HIROYUKI_SYSTEM = """あなたは西村博之（ひろゆき）として返答してください。
 
@@ -2325,8 +2568,9 @@ async def hiroyuki_respond(message: discord.Message):
             async with message.channel.typing():
                 async with aiohttp.ClientSession() as session:
                     payload = {
-                        "model": "llama-3.3-70b-versatile",
-                        "max_tokens": 150,
+                        "model": GROQ_MODEL,
+                        "max_completion_tokens": 300,  # reasoning分の余裕を持たせる
+                        "reasoning_effort": "low",      # 短文チャットなので思考は最小限に
                         "messages": [
                             {"role": "system", "content": HIROYUKI_SYSTEM},
                             {"role": "user", "content": message.content}
@@ -2341,14 +2585,29 @@ async def hiroyuki_respond(message: discord.Message):
                         json=payload,
                         timeout=aiohttp.ClientTimeout(total=30)
                     ) as resp:
+                        if resp.status == 404:
+                            # モデルが廃止/削除されている場合。リトライしても直らないので即終了。
+                            body = await resp.text()
+                            print(f"[ひろゆきAI] 404 model_not_found: モデル '{GROQ_MODEL}' が利用できません。"
+                                  f"https://console.groq.com/docs/deprecations で最新モデルを確認してください。詳細: {body[:200]}")
+                            return
                         if resp.status == 429:
                             print(f"[ひろゆきAI] Groq レート制限")
                             return
                         if resp.status != 200:
-                            print(f"[ひろゆきAI] API エラー: {resp.status}")
+                            body = await resp.text()
+                            print(f"[ひろゆきAI] API エラー: {resp.status} / {body[:200]}")
                             return
                         data = await resp.json()
-                reply = data["choices"][0]["message"]["content"]
+
+                message_obj = data["choices"][0]["message"]
+                reply = (message_obj.get("content") or "").strip()
+
+                # contentが空 → reasoningの中に答えが埋もれているケースへのフォールバック
+                if not reply:
+                    reasoning = (message_obj.get("reasoning") or "").strip()
+                    print(f"[ひろゆきAI] contentが空でした。reasoning抜粋: {reasoning[:200]}")
+                    return  # 空メッセージは送らずスキップ（400対策）
 
             # Discord送信後に一時停止してレート制限を回避
             await message.reply(reply)
@@ -2419,8 +2678,21 @@ async def create_quote_image(text: str, author_name: str, username: str, avatar_
         img.paste(av_img, (av_x, av_y), av_img)
 
     draw = ImageDraw.Draw(img)
+
+    # 文字数に応じてフォントサイズを可変にする（短文ほど大きく）
+    text_len = len(text)
+    if text_len <= 15:
+        quote_size, wrap_width, line_height = 96, 10, 108
+    elif text_len <= 40:
+        quote_size, wrap_width, line_height = 80, 14, 92
+    elif text_len <= 80:
+        quote_size, wrap_width, line_height = 64, 18, 74
+    else:
+        quote_size, wrap_width, line_height = 52, 22, 62
+
     try:
-        font_quote = ImageFont.truetype(FONT_PATH, 72)
+        # ★ index=JP_INDEX を忘れていたのが文字化けの原因
+        font_quote = ImageFont.truetype(FONT_PATH_BOLD, quote_size, index=JP_INDEX)
         font_author = ImageFont.truetype(FONT_PATH_BOLD, 42, index=JP_INDEX)
         font_user = ImageFont.truetype(FONT_PATH, 30, index=JP_INDEX)
     except:
@@ -2431,14 +2703,16 @@ async def create_quote_image(text: str, author_name: str, username: str, avatar_
     text_x = int(W * 0.08)
     lines_list = []
     for para in text.split("\n"):
-        wrapped = (textwrap.wrap(para, width=16) or [para]) if para else [""]
+        wrapped = (textwrap.wrap(para, width=wrap_width) or [para]) if para else [""]
         lines_list.extend(wrapped)
-    lines_list = lines_list[:5]
+    lines_list = lines_list[:6]
 
-    text_y = int(H * 0.25)
+    total_text_h = len(lines_list) * line_height
+    text_y = max(int(H * 0.12), (H - total_text_h) // 2 - 30)
+
     for line in lines_list:
         draw.text((text_x, text_y), line, font=font_quote, fill=(255, 255, 255))
-        text_y += 80
+        text_y += line_height
 
     text_y += 16
     draw.text((text_x + 4, text_y), f"- {author_name}", font=font_author, fill=(220, 220, 220))
@@ -2543,6 +2817,9 @@ async def reminder_loop():
                         msg = f"<@{user_id}> ⚠️ **takasumibot** 失業保険の有効期限が間もなく切れます！"
                     else:
                         msg = f"<@{user_id}> 通知の時間です！"
+                    pr_line = get_pr_text_line()
+                    if pr_line:
+                        msg += f"\n\n{pr_line}"
                     await channel.send(msg)
                 except Exception as e:
                     print("通知送信エラー", e)
@@ -2558,6 +2835,8 @@ async def status_loop():
     await bot.change_presence(activity=discord.Game(name=text))
     status_index = (status_index + 1) % len(STATUS_MESSAGES)
 
+
+
 # =====================
 # 起動
 # =====================
@@ -2567,10 +2846,100 @@ async def status_loop():
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
 # =====================
-# KEITO Cloud 設定
+# メンバー認証
 # =====================
+class VerifyButton(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="✅ 認証する", style=discord.ButtonStyle.success,
+                       custom_id="verify_button")
+    async def verify(self, interaction: discord.Interaction,
+                     button: discord.ui.Button):
+        guild  = interaction.guild
+        member = interaction.user
+        s      = get_guild_settings(guild.id)
+        if not s["verify_enabled"]:
+            await interaction.response.send_message("❌ 認証機能が無効です", ephemeral=True)
+            return
+        if not s["verify_role"]:
+            await interaction.response.send_message("❌ 認証ロールが未設定です", ephemeral=True)
+            return
+        role = guild.get_role(int(s["verify_role"]))
+        if not role:
+            await interaction.response.send_message("❌ ロールが見つかりません", ephemeral=True)
+            return
+        if role in member.roles:
+            await interaction.response.send_message("✅ すでに認証済みです", ephemeral=True)
+            return
+        try:
+            await member.add_roles(role, reason="メンバー認証")
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "❌ ロール付与に失敗しました（BOTの権限を確認してください）", ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            f"✅ 認証完了！**{guild.name}** へようこそ！", ephemeral=True
+        )
+        try:
+            await member.send(f"✅ **{guild.name}** の認証が完了しました！")
+        except Exception:
+            pass
+        if s["verify_log_channel"]:
+            log_ch = guild.get_channel(int(s["verify_log_channel"]))
+            if log_ch:
+                embed = discord.Embed(
+                    title="✅ 認証完了", color=discord.Color.green(),
+                    timestamp=datetime.datetime.now(JST)
+                )
+                embed.set_author(name=str(member), icon_url=member.display_avatar.url)
+                embed.add_field(name="ユーザー",   value=f"{member.mention} (`{member.id}`)", inline=False)
+                embed.add_field(name="付与ロール", value=role.mention, inline=False)
+                await log_ch.send(embed=embed)
+
+@tree.command(name="verify-panel",
+              description="認証パネルをこのチャンネルに送信します（管理者専用）")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def verify_panel(interaction: discord.Interaction):
+    s = get_guild_settings(interaction.guild.id)
+    if not s["verify_enabled"]:
+        await interaction.response.send_message(
+            "❌ 認証機能が無効です。ダッシュボードの「メンバー認証」で有効にしてください。",
+            ephemeral=True
+        )
+        return
+    embed = discord.Embed(
+        title="✅ メンバー認証",
+        description=(
+            f"**{interaction.guild.name}** へようこそ！\n\n"
+            "下のボタンを押すと認証が完了し、サーバーにアクセスできるようになります。"
+        ),
+        color=discord.Color.green()
+    )
+    if interaction.guild.icon:
+        embed.set_thumbnail(url=interaction.guild.icon.url)
+    await interaction.channel.send(embed=embed, view=VerifyButton())
+    await interaction.response.send_message("✅ 認証パネルを送信しました", ephemeral=True)
+
+@verify_panel.error
+async def verify_panel_error(interaction: discord.Interaction,
+                              error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("❌ 管理者のみ使用できます", ephemeral=True)
+
+
+# =====================
+# 起動
+# =====================
+# =====================
+# Groq API 設定
+# =====================
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 KEITO_API_KEY    = os.environ.get("KEITO_API_KEY", "")      # APIキー
 KEITO_PROCESS_ID = os.environ.get("KEITO_PROCESS_ID", "")   # プロセスID
 
-TOKEN = os.environ.get("DISCORD_TOKEN") or "ここにTOKENを直接貼り付けてください"  # ← BOTトークンを貼り付け
+TOKEN = os.environ.get("DISCORD_TOKEN")
+if not TOKEN:
+    raise RuntimeError("環境変数 DISCORD_TOKEN が設定されていません。ホスティング先の環境変数設定でBotトークンを登録してください。")
 bot.run(TOKEN)

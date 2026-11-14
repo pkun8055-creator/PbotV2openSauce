@@ -3220,8 +3220,8 @@ async def verify_panel_error(interaction: discord.Interaction,
 # Groq API 設定
 # =====================
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-KEITO_API_KEY    = os.environ.get("KEITO_API_KEY", "")      # APIキー
-KEITO_PROCESS_ID = os.environ.get("KEITO_PROCESS_ID", "")   # プロセスID
+KEITO_API_KEY    = os.environ.get("KAPI_KEY", "")      # APIキー
+KEITO_PROCESS_ID = os.environ.get("KPROCESS_ID", "")   # プロセスID
 
 TOKEN = os.environ.get("DISCORD_TOKEN")
 if not TOKEN:

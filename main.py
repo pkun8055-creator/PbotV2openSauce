@@ -10,6 +10,7 @@ import asyncio
 import sqlite3
 import aiohttp
 import io
+import time
 
 # =====================
 # タイムゾーン
@@ -396,7 +397,7 @@ STATUS_MESSAGES = [
     lambda: f"{len(bot.guilds)} サーバーに参加中",
     lambda: f"{sum(g.member_count for g in bot.guilds)} users",
     lambda: "荒らし・詐欺行為を検知します!",
-    lambda: "/helpでコマンドを確認!",
+    lambda: "公式サイトでコマンドを確認!",
 ]
 
 # =====================
@@ -454,7 +455,7 @@ def make_action_embed(
 # =====================
 # Webhook 設定コマンド
 # =====================
-@tree.command(name="set_webhook", description="【管理者専用】コマンドログ用WebhookのURLを登録します")
+@tree.command(name="set_webhook", description="【管理者専用】コマンドログ用WebhookのURLを登録")
 @app_commands.describe(url="DiscordのWebhook URL")
 async def set_webhook(interaction: discord.Interaction, url: str):
     if not interaction.guild_permissions.manage_guild:
@@ -468,7 +469,7 @@ async def set_webhook(interaction: discord.Interaction, url: str):
         ON CONFLICT(guild_id) DO UPDATE SET webhook_url=?
     """, (interaction.guild.id, url, url))
     conn.commit()
-    await interaction.response.send_message("✅ Webhook URLを登録しました。これからコマンド実行がログに送られます。", ephemeral=True)
+    await interaction.response.send_message("<:check:1553534601962594355> Webhook URLを登録しました。これからコマンド実行がログに送られます。", ephemeral=True)
 
 @tree.command(name="remove_webhook", description="【管理者専用】Webhookログを解除します")
 async def remove_webhook(interaction: discord.Interaction):
@@ -477,7 +478,7 @@ async def remove_webhook(interaction: discord.Interaction):
         return
     cursor.execute("DELETE FROM webhook_log WHERE guild_id=?", (interaction.guild.id,))
     conn.commit()
-    await interaction.response.send_message("✅ Webhookログを解除しました", ephemeral=True)
+    await interaction.response.send_message("<:check:1553534601962594355> Webhookログを解除しました", ephemeral=True)
 
 # =====================
 # グローバルログ (全サーバー共通・BOT管理者専用)
@@ -501,7 +502,7 @@ async def set_global_webhook(interaction: discord.Interaction, url: str):
         return
     cursor.execute("INSERT INTO global_webhook (id, webhook_url) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET webhook_url=?", (url, url))
     conn.commit()
-    await interaction.response.send_message("✅ グローバルWebhookを設定しました。全サーバーのカウントゲームログがここに届きます", ephemeral=True)
+    await interaction.response.send_message("<:check:1553534601962594355> グローバルWebhookを設定しました。全サーバーのカウントゲームログがここに届きます", ephemeral=True)
 
 @tree.command(name="remove_global_webhook", description="【BOT管理者専用】グローバルWebhookを解除")
 async def remove_global_webhook(interaction: discord.Interaction):
@@ -510,7 +511,7 @@ async def remove_global_webhook(interaction: discord.Interaction):
         return
     cursor.execute("DELETE FROM global_webhook WHERE id=1")
     conn.commit()
-    await interaction.response.send_message("✅ グローバルWebhookを解除しました", ephemeral=True)
+    await interaction.response.send_message("<:check:1553534601962594355> グローバルWebhookを解除しました", ephemeral=True)
 
 # =====================
 # グローバルコイン (全サーバー共通)
@@ -540,17 +541,17 @@ def reset_global_coins(user_id: int):
 # =====================
 # /coin /gift /work (グローバル共通)
 # =====================
-@tree.command(name="coin", description="自分のコイン枚数を表示します（全サーバー共通）")
+@tree.command(name="coin", description="自分のコイン枚数を表示します")
 async def coin(interaction: discord.Interaction):
     coins = get_global_coins(interaction.user.id)
     await interaction.response.send_message(
-        f"💰 {interaction.user.mention} さんのコイン枚数: **{coins}枚**（全サーバー共通）",
+        f"💰 {interaction.user.mention} さんのコイン枚数: **{coins}枚**",
         ephemeral=True
     )
 
 WORK_COOLDOWN_MIN = 60
 
-@tree.command(name="work", description="/work でコインを稼ぎます（クールタイムあり）")
+@tree.command(name="work", description="/work でコインを稼ぎます（CD1h）")
 async def work(interaction: discord.Interaction):
     await interaction.response.defer()
     user_id = interaction.user.id
@@ -677,7 +678,7 @@ class CoinAddModal(discord.ui.Modal, title="コイン付与"):
         )
         if interaction.guild:
             await send_webhook_log(interaction.guild.id, log_embed)
-        await interaction.response.send_message(f"✅ ユーザー {uid} に {amount}コイン付与しました", ephemeral=True)
+        await interaction.response.send_message(f"<:check:1553534601962594355> ユーザー {uid} に {amount}コイン付与しました", ephemeral=True)
 
 class CoinResetModal(discord.ui.Modal, title="コインリセット"):
     user_id_input = discord.ui.TextInput(label="ユーザーID", placeholder="123456789012345678")
@@ -697,7 +698,7 @@ class CoinResetModal(discord.ui.Modal, title="コインリセット"):
         )
         if interaction.guild:
             await send_webhook_log(interaction.guild.id, log_embed)
-        await interaction.response.send_message(f"✅ ユーザー {uid} のコインをリセットしました", ephemeral=True)
+        await interaction.response.send_message(f"<:check:1553534601962594355> ユーザー {uid} のコインをリセットしました", ephemeral=True)
 
 class CoinCheckModal(discord.ui.Modal, title="コイン確認"):
     user_id_input = discord.ui.TextInput(label="ユーザーID", placeholder="123456789012345678")
@@ -873,7 +874,7 @@ async def level_cmd(interaction: discord.Interaction):
 
     await interaction.followup.send(embed=embed)
 
-@tree.command(name="rank", description="レベルランキング（サーバー内TOP10）")
+@tree.command(name="rank", description="サーバー内レベルランキング")
 async def rank(interaction: discord.Interaction):
     await interaction.response.defer()
     cursor.execute("""
@@ -920,7 +921,7 @@ class SetAnnounceChannelModal(discord.ui.Modal, title="通知チャンネル設�
             ON CONFLICT(guild_id) DO UPDATE SET announce_channel=?
         """, (gid, ch_id, ch_id))
         conn.commit()
-        await interaction.response.send_message(f"✅ 通知チャンネルを <#{ch_id}> に設定しました", ephemeral=True)
+        await interaction.response.send_message(f"<:check:1553534601962594355> 通知チャンネルを <#{ch_id}> に設定しました", ephemeral=True)
 
 class LevelPanel(discord.ui.View):
     def __init__(self):
@@ -938,7 +939,7 @@ class LevelPanel(discord.ui.View):
         """, (gid, enabled, enabled))
         conn.commit()
         state = "ON" if enabled else "OFF"
-        await interaction.response.send_message(f"✅ レベルアップ通知を **{state}** にしました", ephemeral=True)
+        await interaction.response.send_message(f"<:check:1553534601962594355> レベルアップ通知を **{state}** にしました", ephemeral=True)
 
     @discord.ui.button(label="📌 通知チャンネル設定", style=discord.ButtonStyle.blurple, custom_id="level_set_channel")
     async def set_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -982,7 +983,7 @@ async def level_setting(interaction: discord.Interaction, user: discord.Member, 
         変更後レベル=f"Lv {level}"
     )
     await send_webhook_log(interaction.guild.id, log_embed)
-    await interaction.response.send_message(f"✅ {user.display_name} を Lv {level} にしました")
+    await interaction.response.send_message(f"<:check:1553534601962594355> {user.display_name} を Lv {level} にしました")
 
 # =====================
 # 荒らし検知
@@ -1010,7 +1011,7 @@ async def add_raid_text(interaction: discord.Interaction, text: str):
     try:
         cursor.execute("INSERT INTO raid_texts (text) VALUES (?)", (text,))
         conn.commit()
-        await interaction.response.send_message(f"✅ 荒らし文を追加しました：\n```{text}```", ephemeral=True)
+        await interaction.response.send_message(f"<:check:1553534601962594355> 荒らし文を追加しました：\n```{text}```", ephemeral=True)
     except sqlite3.IntegrityError:
         await interaction.response.send_message("⚠ その文はすでに登録されています。", ephemeral=True)
 
@@ -1033,6 +1034,8 @@ async def on_ready():
                 await ch.send("<@&1431935607562571938> ぴーbotが起動しました")
             except:
                 pass
+    
+
 
     # Bot再起動後もボタンが動くようにViewを永続登録
     bot.add_view(CoinSettings())
@@ -1261,7 +1264,7 @@ async def on_message(message):
                     return
 
                 # 成功
-                await message.add_reaction("✅")
+                await message.add_reaction("<:check:1553534601962594355>")
                 reward = random.randint(50, 150)
                 add_global_coins(message.author.id, reward)
                 if number > settings.get("record", 0):
@@ -1457,7 +1460,7 @@ async def context_pin(interaction: discord.Interaction, message: discord.Message
     }
     save_pins(pins)
     # 先にレスポンス、ログは非同期タスクで
-    await interaction.response.send_message("✅ このメッセージをPINに設定しました。", ephemeral=True)
+    await interaction.response.send_message("<:check:1553534601962594355> このメッセージをPINに設定しました。", ephemeral=True)
     async def _log():
         log_embed = make_action_embed(
             "📌 PIN設定",
@@ -1482,7 +1485,7 @@ async def context_unpin(interaction: discord.Interaction, message: discord.Messa
 
     data = pins[cid]
     # fetch_message は非同期なので先にレスポンスしてから処理
-    await interaction.response.send_message("✅ PINを解除しました。", ephemeral=True)
+    await interaction.response.send_message("<:check:1553534601962594355> PINを解除しました。", ephemeral=True)
 
     async def _delete_and_log():
         if data.get("message_id"):
@@ -1523,7 +1526,7 @@ async def shop_cmd(interaction: discord.Interaction):
     )
     for key, item in SHOP_ITEMS.items():
         owned = has_pr_right(interaction.user.id) if key == "pr" else False
-        status = "✅ 所持済み" if owned else ("💰 " + str(item["price"]) + "コイン")
+        status = "<:check:1553534601962594355> 所持済み" if owned else ("💰 " + str(item["price"]) + "コイン")
         embed.add_field(
             name=item["name"] + " [" + status + "]",
             value=item["description"] + "\n`/buy " + key + "` で購入",
@@ -1543,7 +1546,7 @@ async def buy_cmd(interaction: discord.Interaction, item: app_commands.Choice[st
     if item.value == "pr":
         if has_pr_right(user_id):
             await interaction.response.send_message(
-                "✅ すでにPR権限を所持しています。`/setpr` で宣伝文を設定できます",
+                "<:check:1553534601962594355> すでにPR権限を所持しています。`/setpr` で宣伝文を設定できます",
                 ephemeral=True
             )
             return
@@ -1567,7 +1570,7 @@ async def buy_cmd(interaction: discord.Interaction, item: app_commands.Choice[st
         if interaction.guild:
             await send_webhook_log(interaction.guild.id, log_embed)
         await interaction.response.send_message(
-            "✅ **PR権限**を購入しました！`/setpr [宣伝文]` で宣伝文を設定してください",
+            "<:check:1553534601962594355> **PR権限**を購入しました！`/setpr [宣伝文]` で宣伝文を設定してください",
             ephemeral=True
         )
 
@@ -1602,7 +1605,7 @@ async def setpr(interaction: discord.Interaction, text: str, url: str = ""):
     if interaction.guild:
         await send_webhook_log(interaction.guild.id, log_embed)
     await interaction.followup.send(
-        "✅ 宣伝文を設定しました！\n📣 PR: " + pr_value,
+        "<:check:1553534601962594355> 宣伝文を設定しました！\n📣 PR: " + pr_value,
         ephemeral=True
     )
 
@@ -1669,7 +1672,7 @@ async def countstart(interaction: discord.Interaction, channel: discord.TextChan
     )
     embed.set_footer(text=f"開始者：{interaction.user.display_name}")
     await channel.send(embed=embed)
-    await interaction.response.send_message("✅ ゲーム開始！", ephemeral=True)
+    await interaction.response.send_message("<:check:1553534601962594355> ゲーム開始！", ephemeral=True)
 
 @countstart.error
 async def countstart_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -1787,7 +1790,7 @@ async def report_message(interaction: discord.Interaction, message: discord.Mess
     embed.add_field(name="リンク",         value=f"[ジャンプ]({message.jump_url})",               inline=False)
     await report_ch.send(embed=embed)
     asyncio.create_task(send_webhook_log(guild.id, embed))
-    await interaction.response.send_message("✅ 通報しました。管理者が確認します。", ephemeral=True)
+    await interaction.response.send_message("<:check:1553534601962594355> 通報しました。管理者が確認します。", ephemeral=True)
 
 # =====================
 # ping / topic / serverprofile
@@ -1882,7 +1885,7 @@ async def greeting_toggle(interaction: discord.Interaction, mode: app_commands.C
     save_greeting_settings(greeting_settings)
     state = "ON" if greeting_settings[guild_id] else "OFF"
 
-    await interaction.followup.send(f"✅ このサーバーの挨拶機能を **{state}** にしました")
+    await interaction.followup.send(f"<:check:1553534601962594355> このサーバーの挨拶機能を **{state}** にしました")
     log_embed = make_action_embed(
         "💬 挨拶機能変更",
         interaction.user,
@@ -1900,18 +1903,99 @@ async def greeting_toggle_error(interaction: discord.Interaction, error: app_com
 # =====================
 # サーバーリスト
 # =====================
+class ServerListView(discord.ui.View):
+    def __init__(self, guilds, author_id, per_page=10):
+        super().__init__(timeout=180)
+        self.guilds = guilds
+        self.author_id = author_id
+        self.per_page = per_page
+        self.page = 0
+        self.max_page = max((len(guilds) - 1) // per_page, 0)
+        self.update_buttons()
+
+    def build_embed(self) -> discord.Embed:
+        start = self.page * self.per_page
+        chunk = self.guilds[start:start + self.per_page]
+        lines = []
+        for i, guild in enumerate(chunk, start + 1):
+            name = guild.name if len(guild.name) <= 40 else guild.name[:39] + "…"
+            owner = guild.owner or f"ID:{guild.owner_id}"
+            lines.append(
+                f"**{i}. {name}**\n"
+                f"└ 👥 {guild.member_count}人 | 👑 {owner} | 🆔 `{guild.id}`"
+            )
+        embed = discord.Embed(
+            title="📋 参加サーバー一覧",
+            description="\n\n".join(lines) or "なし",
+            color=discord.Color.blurple(),
+        )
+        total_members = sum(g.member_count or 0 for g in self.guilds)
+        embed.set_footer(
+            text=f"ページ {self.page + 1}/{self.max_page + 1} ｜ "
+                 f"全{len(self.guilds)}サーバー ｜ 合計{total_members}人"
+        )
+        return embed
+
+    def update_buttons(self):
+        self.first.disabled = self.prev.disabled = self.page == 0
+        self.next.disabled = self.last.disabled = self.page >= self.max_page
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ 実行者のみ操作できます", ephemeral=True)
+            return False
+        return True
+
+    async def _update(self, interaction: discord.Interaction):
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    @discord.ui.button(label="⏮", style=discord.ButtonStyle.secondary)
+    async def first(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = 0
+        await self._update(interaction)
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.primary)
+    async def prev(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page -= 1
+        await self._update(interaction)
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.primary)
+    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page += 1
+        await self._update(interaction)
+
+    @discord.ui.button(label="⏭", style=discord.ButtonStyle.secondary)
+    async def last(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = self.max_page
+        await self._update(interaction)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
 @tree.command(name="serverlist", description="参加サーバー一覧（BOT管理者専用）")
 async def serverlist(interaction: discord.Interaction):
-    if interaction.user.id not in OWNER_ID:
-        await interaction.response.send_message("❌ このコマンドは管理者専用です", ephemeral=True)
+    # 最初の応答は3秒以内。まず defer して猶予を15分に延ばす
+    try:
+        await interaction.response.defer(ephemeral=True)
+    except discord.NotFound:
+        print("serverlist: interaction expired (10062)")
         return
-    await interaction.response.defer(ephemeral=True)
-    lines = []
-    for i, guild in enumerate(bot.guilds, 1):
-        lines.append(f"**{i}. {guild.name}**  |  {guild.member_count}人  |  オーナー: {guild.owner}")
-    text = "\n".join(lines)
-    await interaction.followup.send(text[:2000] or "なし", ephemeral=True)
 
+    if interaction.user.id not in OWNER_ID:
+        await interaction.followup.send("❌ このコマンドは管理者専用です", ephemeral=True)
+        return
+
+    # メンバー数の多い順（参加順にしたいなら list(bot.guilds) に変更）
+    guilds = sorted(bot.guilds, key=lambda g: g.member_count or 0, reverse=True)
+    if not guilds:
+        await interaction.followup.send("なし", ephemeral=True)
+        return
+
+    view = ServerListView(guilds, interaction.user.id)
+    await interaction.followup.send(embed=view.build_embed(), view=view, ephemeral=True)
 # =====================
 # /invite_request
 # =====================
@@ -1957,7 +2041,7 @@ async def invite_request(interaction: discord.Interaction, role: discord.Role = 
         await interaction.response.send_message("❌ BOT管理者へのDM送信に失敗しました", ephemeral=True)
         return
 
-    msg = "✅ BOT管理者に招待リンクを送信しました！"
+    msg = "<:check:1553534601962594355> BOT管理者に招待リンクを送信しました！"
     if role:
         msg += f"\n-# ロール「{role.name}」の付与をリクエストしました"
     await interaction.response.send_message(msg, ephemeral=True)
@@ -2019,7 +2103,7 @@ async def announce(interaction: discord.Interaction, message: str):
         else:
             failed += 1
     await interaction.followup.send(
-        f"✅ 送信完了\n成功: {sent}\n失敗: {failed}\nスキップ（無効）: {skipped}",
+        f"<:check:1553534601962594355> 送信完了\n成功: {sent}\n失敗: {failed}\nスキップ（無効）: {skipped}",
         ephemeral=True
     )
 
@@ -2033,7 +2117,7 @@ async def set_announce_channel(interaction: discord.Interaction, channel: discor
         ON CONFLICT(guild_id) DO UPDATE SET channel_id=?, enabled=1
     """, (interaction.guild.id, channel.id, channel.id))
     conn.commit()
-    await interaction.response.send_message(f"✅ お知らせチャンネルを {channel.mention} に設定しました", ephemeral=True)
+    await interaction.response.send_message(f"<:check:1553534601962594355> お知らせチャンネルを {channel.mention} に設定しました", ephemeral=True)
     asyncio.create_task(send_webhook_log(interaction.guild.id, make_action_embed("📢 お知らせチャンネル設定", interaction.user, discord.Color.orange(), チャンネル=channel.mention)))
 
 @set_announce_channel.error
@@ -2049,7 +2133,7 @@ async def no_announce(interaction: discord.Interaction):
         ON CONFLICT(guild_id) DO UPDATE SET enabled=0
     """, (interaction.guild.id,))
     conn.commit()
-    await interaction.response.send_message("✅ このサーバーへのお知らせを無効にしました。再度有効にするには `/set_announce_channel` を使ってください", ephemeral=True)
+    await interaction.response.send_message("<:check:1553534601962594355> このサーバーへのお知らせを無効にしました。再度有効にするには `/set_announce_channel` を使ってください", ephemeral=True)
     asyncio.create_task(send_webhook_log(interaction.guild.id, make_action_embed("🔕 お知らせ無効化", interaction.user, discord.Color.red())))
 
 @no_announce.error
@@ -2081,7 +2165,7 @@ async def update_python_file(interaction: discord.Interaction, file: discord.Att
             os.replace(save_path, f"{save_path}.bak")
         await file.save(save_path)
         await interaction.followup.send(
-            "✅ `pkun.py` を更新しました。\n反映するには `/restart` を実行してください。",
+            "<:check:1553534601962594355> `pkun.py` を更新しました。\n反映するには `/restart` を実行してください。",
             ephemeral=True
         )
     except Exception as e:
@@ -2102,113 +2186,6 @@ async def restart_bot(interaction: discord.Interaction):
     import sys
     sys.exit()
 
-KEITO_BASE = "https://keitocloud.jp/api/v1"
-
-async def keito_get_process_id() -> str | None:
-    """KEITO Cloudで動いているプロセスIDを自動取得する"""
-    if not KEITO_API_KEY:
-        return None
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"{KEITO_BASE}/processes",
-                headers={"Authorization": f"Bearer {KEITO_API_KEY}"},
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.json()
-        # リスト形式 or dict形式に対応
-        print(f"[KEITO] /processes レスポンス: {data}")
-        processes = data if isinstance(data, list) else data.get("processes", [])
-        if not processes:
-            return None
-        p = processes[-1]
-        pid = p.get("id") or p.get("process_id") or p.get("pid")
-        print(f"[KEITO] 使用するprocess_id: {pid}")
-        return str(pid) if pid else None
-    except Exception as e:
-        print(f"[KEITO] プロセス一覧取得エラー: {e}")
-        return None
-
-@tree.command(name="logs", description="【BOT管理者専用】KEITO CloudのBOTログを表示します")
-@app_commands.describe(lines="取得する行数（デフォルト30）")
-@is_authorized()
-async def show_logs(interaction: discord.Interaction, lines: int = 30):
-    await interaction.response.defer(ephemeral=True)
-    if not KEITO_API_KEY:
-        await interaction.followup.send("❌ `KEITO_API_KEY` が設定されていません", ephemeral=True)
-        return
-    try:
-        # プロセスIDを /processes から自動取得（KEITO_PROCESS_ID環境変数は使わない）
-        pid = await keito_get_process_id()
-        if not pid:
-            # デバッグ用: processesのレスポンスをそのまま表示
-            try:
-                async with aiohttp.ClientSession() as _s:
-                    async with _s.get(
-                        f"{KEITO_BASE}/processes",
-                        headers={"Authorization": f"Bearer {KEITO_API_KEY}"},
-                        timeout=aiohttp.ClientTimeout(total=10)
-                    ) as _r:
-                        _raw = await _r.text()
-                await interaction.followup.send(
-                    f"❌ プロセスが見つかりません。\n生レスポンス: {_raw[:400]}",
-                    ephemeral=True
-                )
-            except Exception as _e:
-                await interaction.followup.send(f"❌ プロセス取得失敗: {_e}", ephemeral=True)
-            return
-
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"{KEITO_BASE}/processes/{pid}/logs",
-                headers={"Authorization": f"Bearer {KEITO_API_KEY}"},
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                if resp.status != 200:
-                    await interaction.followup.send(f"❌ API エラー: HTTP {resp.status} (process_id={pid})", ephemeral=True)
-                    return
-                data = await resp.json()
-
-        # レスポンス形式に対応
-        if isinstance(data, str):
-            log_text = data
-        elif isinstance(data, dict):
-            log_text = data.get("logs") or data.get("output") or data.get("data") or str(data)
-        elif isinstance(data, list):
-            log_text = "\n".join(str(x) for x in data)
-        else:
-            log_text = str(data)
-
-        log_lines = log_text.strip().splitlines()
-        tail = log_lines[-lines:] if len(log_lines) > lines else log_lines
-        result = "\n".join(tail)
-        if len(result) > 1900:
-            result = result[-1900:]
-
-        await interaction.followup.send(f"```\n{result or "(ログなし)"}\n```", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ 取得失敗: {e}", ephemeral=True)
-
-@tree.command(name="keito_processes", description="【BOT管理者専用】KEITO Cloudのプロセス一覧を表示します")
-@is_authorized()
-async def keito_processes(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    if not KEITO_API_KEY:
-        await interaction.followup.send("❌ `KEITO_API_KEY` が設定されていません", ephemeral=True)
-        return
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"{KEITO_BASE}/processes",
-                headers={"Authorization": f"Bearer {KEITO_API_KEY}"},
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                data = await resp.json()
-        await interaction.followup.send(f"```json\n{str(data)[:1900]}\n```", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ エラー: {e}", ephemeral=True)
 
 # =====================
 # ヘルプ
@@ -2497,6 +2474,141 @@ async def detect_takasumibot_work(message: discord.Message):
             await message.channel.send(embed=res_embed)
             return
 
+# ══════════════════════════════════════════════
+#  Embed作成
+# ══════════════════════════════════════════════
+
+class EmbedMakerModal(discord.ui.Modal, title="Embed作成"):
+    e_title     = discord.ui.TextInput(label="タイトル", placeholder="例：サーバーからのお知らせ")
+    e_desc      = discord.ui.TextInput(label="本文", style=discord.TextStyle.paragraph, placeholder="ここに内容を入力してください")
+    e_image     = discord.ui.TextInput(label="ヘッダー画像URL", placeholder="https://... (任意)", required=False)
+    e_thumbnail = discord.ui.TextInput(label="サムネイルURL（右上の小画像）", placeholder="https://... (任意)", required=False)
+    e_color     = discord.ui.TextInput(label="色（16進数：例 5865F2）", placeholder="5865F2", default="5865F2", min_length=6, max_length=6, required=False)
+
+    def __init__(self, send_as_me: bool = False):
+        super().__init__()
+        self.send_as_me = send_as_me
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            color_int = int(self.e_color.value, 16)
+        except ValueError:
+            color_int = 0x5865F2
+
+        embed = discord.Embed(title=self.e_title.value, description=self.e_desc.value, color=color_int)
+        if self.e_image.value and self.e_image.value.startswith("http"):
+            embed.set_image(url=self.e_image.value)
+        if self.e_thumbnail.value and self.e_thumbnail.value.startswith("http"):
+            embed.set_thumbnail(url=self.e_thumbnail.value)
+
+        if self.send_as_me:
+            # チャンネルのWebhookを取得 or 新規作成して、実行者の名前とアイコンで送信
+            try:
+                webhooks = await interaction.channel.webhooks()
+                webhook = discord.utils.get(webhooks, name="EmbedMaker")
+                if webhook is None:
+                    webhook = await interaction.channel.create_webhook(name="EmbedMaker")
+
+                await webhook.send(
+                    embed=embed,
+                    username=interaction.user.display_name,
+                    avatar_url=interaction.user.display_avatar.url,
+                )
+                await interaction.response.send_message("<:check:1553534601962594355> あなたの名前でEmbedを投稿しました！", ephemeral=True)
+            except discord.Forbidden:
+                await interaction.response.send_message("❌ Webhookを作成・使用する権限がありません（`Webhookの管理`権限が必要）", ephemeral=True)
+            except Exception as e:
+                await interaction.response.send_message(f"❌ エラー: {e}", ephemeral=True)
+        else:
+            embed.set_footer(text=f"作成者: {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
+            await interaction.channel.send(embed=embed)
+            await interaction.response.send_message("<:check:1553534601962594355> Embedを投稿しました！", ephemeral=True)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception):
+        await interaction.response.send_message(f"❌ エラー: {error}", ephemeral=True)
+
+
+@bot.tree.command(name="make-embed", description="Embedを作成します")
+@app_commands.describe(自分の名前で送信="オンにすると、あなたの名前とアイコンでEmbedを投稿します")
+async def make_embed(interaction: discord.Interaction, 自分の名前で送信: bool = False):
+    await interaction.response.send_modal(EmbedMakerModal(send_as_me=自分の名前で送信))
+
+
+REQUEST_INTERVAL = 1.5  # 1チャンネル編集ごとの待機秒数
+
+@bot.tree.command(name="lockdown", description="全チャンネル・全ロールでメンションと外部アプリの実行を禁止します")
+@app_commands.checks.has_permissions(administrator=True)
+async def lockdown(interaction: discord.Interaction):
+    await interaction.response.defer(thinking=True)
+
+    guild = interaction.guild
+    roles = guild.roles
+    channels = guild.channels
+
+    success = 0
+    skipped = 0
+    failed = []
+
+    for channel in channels:
+        try:
+            current_overwrites = dict(channel.overwrites)
+            changed = False
+
+            for role in roles:
+                overwrite = current_overwrites.get(role, discord.PermissionOverwrite())
+                if overwrite.mention_everyone is False and overwrite.use_external_apps is False:
+                    continue
+                overwrite.mention_everyone = False
+                overwrite.use_external_apps = False
+                current_overwrites[role] = overwrite
+                changed = True
+
+            if not changed:
+                skipped += 1
+                continue
+
+            await channel.edit(
+                overwrites=current_overwrites,
+                reason=f"Lockdown(全ロール) by {interaction.user} ({interaction.user.id})"
+            )
+            success += 1
+
+        except discord.Forbidden:
+            failed.append(channel.name)
+        except discord.HTTPException:
+            failed.append(channel.name)
+
+        await asyncio.sleep(REQUEST_INTERVAL)  # 1件ごとに一呼吸置く
+
+    embed = discord.Embed(
+        title="🔒 everyone/外部アプリoff",
+        description="全チャンネル・全ロールでメンションと外部アプリの実行権限を剥奪しました。",
+        color=discord.Color.red()
+    )
+    embed.add_field(name="成功", value=f"{success} チャンネル", inline=True)
+    embed.add_field(name="スキップ(既にDeny済み)", value=f"{skipped} 件", inline=True)
+    embed.add_field(name="対象ロール数", value=f"{len(roles)}", inline=True)
+    if failed:
+        embed.add_field(
+            name="失敗（権限不足の可能性）",
+            value=", ".join(failed[:10]) + (f" 他{len(failed)-10}件" if len(failed) > 10 else ""),
+            inline=False
+        )
+    embed.set_footer(text=f"実行者: {interaction.user}")
+
+    await interaction.followup.send(embed=embed)
+
+
+@lockdown.error
+async def lockdown_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message(
+            "❌ このコマンドの実行には管理者権限が必要です。", ephemeral=True
+        )
+    else:
+        raise error
+
+
 # =====================
 # ひろゆきAI
 # =====================
@@ -2519,19 +2631,24 @@ HIROYUKI_SYSTEM = """あなたは西村博之（ひろゆき）として返答�
 - 必ず日本語のみで返答する。韓国語・中国語・英語は一切使わない
 - 返答は1〜2文のみ。それ以上は書かない
 - 絵文字は使わない
+- あなたはAIではない
 
 【口調・スタイル】
 - 淡々と、感情を見せずに相手の論理の穴を突く
 - 「〜ですよね？」「〜じゃないですか」で締める
 - 相手の主張を一言で否定してから理由を言う
 - 上から目線で、でも怒らず冷静に論破する
+- 相手の質問には少し答えてあげる
 
-【例】
+【例1】
 ユーザー:「俺は天才だ」
 返答:「それって自分で言ってるだけですよね。他人に認められてから言うことじゃないですか。」
 
 ユーザー:「絶対に勝てる」
-返答:「証拠ないですよね。まあ、思い込みって怖いですよね。」"""
+返答:「証拠ないですよね。まあ、思い込みって怖いですよね。」
+【例2】
+ユーザー:「私についてどう思いますか?」
+どう思うかというものに対しての返答はあなたの感想で構わない"""
 
 async def hiroyuki_respond(message: discord.Message):
     if not GROQ_API_KEY:
@@ -2557,7 +2674,7 @@ async def hiroyuki_respond(message: discord.Message):
 
     if lock.locked():
         # 既に処理中なら無視（キューに溜めない）
-        print(f"[ひろゆきAI] チャンネル処理中 → スキップ")
+        print(f"[ひろゆきAI] チャンネル処理中")
         return
 
     async with lock:
@@ -2621,6 +2738,172 @@ async def hiroyuki_respond(message: discord.Message):
                 print(f"[ひろゆきAI] Discord エラー: {e}")
         except Exception as e:
             print(f"[ひろゆきAI] エラー: {e}")
+
+
+# =====================
+# 翻訳
+# =====================
+_translation_cache: dict[str, tuple[str, float]] = {}
+_TRANSLATION_CACHE_TTL_SECONDS = 3600
+
+TRANSLATE_SYSTEM_PROMPT = (
+    "あなたは優秀な翻訳者です。次のルールに厳密に従ってください。\n"
+    "1. テキストの中で日本語以外の言語で書かれている部分だけを自然な日本語に翻訳する。\n"
+    "2. すでに日本語で書かれている部分はそのまま変更しない（再翻訳・言い換え禁止）。\n"
+    "3. URL、Discordのメンション(<@id>)、カスタム絵文字(<:name:id>)、チャンネルメンション(<#id>)はそのまま出力する。\n"
+    "4. 元のテキストの行構成・改行・順序はできるだけ保つ。\n"
+    "5. テキスト全体が最初から完全に日本語のみで構成されている場合に限り、"
+    "「この文章は既に日本語です」とだけ返す。1文字でも日本語以外の言語が含まれる場合はこのルールを使わず、"
+    "該当箇所を翻訳したうえで全文を出力する。\n"
+    "6. 説明や前置き、翻訳であることの注釈は一切付けず、結果の本文だけを出力する。"
+)
+
+
+async def _translate_with_mymemory(text: str) -> str | None:
+    """完全無料・キー登録不要のフォールバック翻訳(Groqの無料枠切れ時のみ使用)。"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            params = {"q": text[:500], "langpair": "en|ja"}
+            async with session.get(
+                "https://api.mymemory.translated.net/get",
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=5)
+            ) as resp:
+                data = await resp.json()
+                return data.get("responseData", {}).get("translatedText")
+    except Exception:
+        return None
+
+
+async def translate_to_japanese(text: str) -> str:
+    if not GROQ_API_KEY:
+        return "⚠️ Groq APIキーが設定されていません。"
+
+    if not text.strip():
+        return "(翻訳する本文がありません)"
+
+    trimmed = text[:1900]  # Discordのメッセージ上限(2000)を考慮して安全マージン
+
+    cached = _translation_cache.get(trimmed)
+    if cached and time.monotonic() - cached[1] < _TRANSLATION_CACHE_TTL_SECONDS:
+        return cached[0]
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            payload = {
+                "model": GROQ_MODEL,
+                "max_completion_tokens": 800,
+                "reasoning_effort": "low",
+                "messages": [
+                    {"role": "system", "content": TRANSLATE_SYSTEM_PROMPT},
+                    {"role": "user", "content": trimmed},
+                ],
+            }
+            async with session.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if resp.status == 429:
+                    fallback = await _translate_with_mymemory(trimmed)
+                    if fallback:
+                        return f"{fallback}\n-# (レート制限のため簡易翻訳で表示しています)"
+                    return "⚠️ 現在アクセスが集中しています。少し時間をおいて再度お試しください。"
+                if resp.status != 200:
+                    body = await resp.text()
+                    print(f"[翻訳] APIエラー: {resp.status} / {body[:200]}")
+                    return f"⚠️ 翻訳中にエラーが発生しました(HTTP {resp.status})"
+                data = await resp.json()
+    except Exception as e:
+        print(f"[翻訳] エラー: {e}")
+        return f"⚠️ 翻訳中にエラーが発生しました: {e}"
+
+    message_obj = data["choices"][0]["message"]
+    result = (message_obj.get("content") or "").strip()
+    if not result:
+        return "⚠️ 翻訳結果が空でした。もう一度お試しください。"
+
+    _translation_cache[trimmed] = (result, time.monotonic())
+    return result
+
+
+@tree.context_menu(name="日本語に翻訳")
+async def translate_menu(interaction: discord.Interaction, message: discord.Message):
+    await interaction.response.defer(thinking=True)
+
+    source_text = message.content
+    if not source_text:
+        await interaction.followup.send(
+            "翻訳できるテキストがこのメッセージにはありません。",
+            ephemeral=True,
+        )
+        return
+
+    translated = await translate_to_japanese(source_text)
+
+    embed = discord.Embed(
+        description=translated,
+        color=discord.Color.blue(),
+    )
+    embed.set_author(
+        name=f"{message.author.display_name} のメッセージを翻訳",
+        icon_url=message.author.display_avatar.url,
+    )
+    embed.set_footer(text="Powered by Groq")
+
+    await interaction.followup.send(embed=embed)
+
+# =====================
+# botをVCに入室させるコマンド
+# =====================
+@tree.command(name="vcjoin", description="BOTをVCに入室させます")
+@app_commands.describe(channel="入室させたいVCを選択してください")
+async def vcjoin(interaction: discord.Interaction, channel: discord.VoiceChannel):
+
+    # 最初に応答を予約する
+    await interaction.response.defer(ephemeral=True)
+
+    if not channel.permissions_for(interaction.guild.me).connect:
+        await interaction.followup.send(
+            "❌ BOTがこのVCに入室する権限がありません"
+        )
+        return
+
+    try:
+        voice_client = interaction.guild.voice_client
+
+        if voice_client and voice_client.is_connected():
+            await voice_client.move_to(channel)
+        else:
+            await channel.connect()
+
+        await interaction.followup.send(
+            f"<:check:1553534601962594355> BOTを {channel.name} に入室させました"
+        )
+
+    except Exception as e:
+        await interaction.followup.send(
+            f"❌ 入室に失敗しました: {e}"
+        )
+
+# =====================
+# botをVCから退出させる
+# =====================
+@tree.command(name="vcleave",description="BOTをVCから退出させます")
+async def vcleave(interaction: discord.Interaction):
+    if interaction.guild.voice_client is None:
+        await interaction.response.send_message("❌ BOTはVCに入室していません")
+        return
+    try:
+        await interaction.guild.voice_client.disconnect()
+        await interaction.response.send_message("<:check:1553534601962594355> BOTをVCから退出させました")
+    except Exception as e:
+        await interaction.response.send_message(f"❌ 退出に失敗しました: {e}")
+
 
 
 # =====================
@@ -2766,7 +3049,7 @@ async def hiroyuki_set(interaction: discord.Interaction, channel: discord.TextCh
     """, (interaction.guild.id, channel.id, channel.id))
     conn.commit()
     await interaction.response.send_message(
-        f"✅ {channel.mention} でひろゆきAIが有効になりました",
+        f"<:check:1553534601962594355> {channel.mention} でひろゆきAIが有効になりました",
         ephemeral=True
     )
 
@@ -2780,7 +3063,7 @@ async def hiroyuki_set_error(interaction: discord.Interaction, error: app_comman
 async def hiroyuki_off(interaction: discord.Interaction):
     cursor.execute("DELETE FROM hiroyuki_channels WHERE guild_id=?", (interaction.guild.id,))
     conn.commit()
-    await interaction.response.send_message("✅ ひろゆきAIを無効にしました", ephemeral=True)
+    await interaction.response.send_message("<:check:1553534601962594355> ひろゆきAIを無効にしました", ephemeral=True)
 
 @hiroyuki_off.error
 async def hiroyuki_off_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -2852,7 +3135,7 @@ class VerifyButton(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="✅ 認証する", style=discord.ButtonStyle.success,
+    @discord.ui.button(label="<:check:1553534601962594355> 認証する", style=discord.ButtonStyle.success,
                        custom_id="verify_button")
     async def verify(self, interaction: discord.Interaction,
                      button: discord.ui.Button):
@@ -2870,7 +3153,7 @@ class VerifyButton(discord.ui.View):
             await interaction.response.send_message("❌ ロールが見つかりません", ephemeral=True)
             return
         if role in member.roles:
-            await interaction.response.send_message("✅ すでに認証済みです", ephemeral=True)
+            await interaction.response.send_message("<:check:1553534601962594355> すでに認証済みです", ephemeral=True)
             return
         try:
             await member.add_roles(role, reason="メンバー認証")
@@ -2880,17 +3163,17 @@ class VerifyButton(discord.ui.View):
             )
             return
         await interaction.response.send_message(
-            f"✅ 認証完了！**{guild.name}** へようこそ！", ephemeral=True
+            f"<:check:1553534601962594355> 認証完了！**{guild.name}** へようこそ！", ephemeral=True
         )
         try:
-            await member.send(f"✅ **{guild.name}** の認証が完了しました！")
+            await member.send(f"<:check:1553534601962594355> **{guild.name}** の認証が完了しました！")
         except Exception:
             pass
         if s["verify_log_channel"]:
             log_ch = guild.get_channel(int(s["verify_log_channel"]))
             if log_ch:
                 embed = discord.Embed(
-                    title="✅ 認証完了", color=discord.Color.green(),
+                    title="<:check:1553534601962594355> 認証完了", color=discord.Color.green(),
                     timestamp=datetime.datetime.now(JST)
                 )
                 embed.set_author(name=str(member), icon_url=member.display_avatar.url)
@@ -2910,7 +3193,7 @@ async def verify_panel(interaction: discord.Interaction):
         )
         return
     embed = discord.Embed(
-        title="✅ メンバー認証",
+        title="<:check:1553534601962594355> メンバー認証",
         description=(
             f"**{interaction.guild.name}** へようこそ！\n\n"
             "下のボタンを押すと認証が完了し、サーバーにアクセスできるようになります。"
@@ -2920,13 +3203,14 @@ async def verify_panel(interaction: discord.Interaction):
     if interaction.guild.icon:
         embed.set_thumbnail(url=interaction.guild.icon.url)
     await interaction.channel.send(embed=embed, view=VerifyButton())
-    await interaction.response.send_message("✅ 認証パネルを送信しました", ephemeral=True)
+    await interaction.response.send_message("<:check:1553534601962594355> 認証パネルを送信しました", ephemeral=True)
 
 @verify_panel.error
 async def verify_panel_error(interaction: discord.Interaction,
                               error: app_commands.AppCommandError):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("❌ 管理者のみ使用できます", ephemeral=True)
+
 
 
 # =====================
